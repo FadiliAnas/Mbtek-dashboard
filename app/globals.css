@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+:root {
+  --mbtek-orange: #F26522;
+  --mbtek-dark: #1A1A1A;
+  --mbtek-bg: #FAFAFA;
+  --mbtek-success: #2EB872;
+  --mbtek-danger: #E74C3C;
+  --mbtek-warning: #F39C12;
+}
+
+@theme inline {
+  --color-orange: var(--mbtek-orange);
+  --color-dark: var(--mbtek-dark);
+  --color-mbg: var(--mbtek-bg);
+  --color-success: var(--mbtek-success);
+  --color-danger: var(--mbtek-danger);
+  --color-warning: var(--mbtek-warning);
+}
+
+body {
+  background: var(--mbtek-bg);
+  color: var(--mbtek-dark);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}

@@ -10,6 +10,7 @@ const tabs = [
   { label: 'Calls', href: '/dashboard/calls' },
   { label: 'Lead Sources', href: '/dashboard/sources' },
   { label: 'Pipelines Audit', href: '/dashboard/pipelines' },
+  { label: 'Analytics Test', href: '/dashboard/analytics' },
 ]
 
 export function DashboardNav() {

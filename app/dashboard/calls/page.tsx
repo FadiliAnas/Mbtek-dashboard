@@ -1,6 +1,8 @@
 import { Suspense } from 'react'
 import { getNumberAnalytics, getAgentAnalytics } from '@/lib/justcall-analytics'
 import { AgentPerformanceSection } from '@/components/AgentPerformanceSection'
+import { CallsVolumeChart } from '@/components/Charts'
+import { getCalls } from '@/lib/justcall'
 
 export const revalidate = 1800
 
@@ -65,14 +67,41 @@ async function CallsData() {
   const prevFrom = prevStart.toISOString().split('T')[0]
   const prevTo = prevEnd.toISOString().split('T')[0]
 
-  const [curr, prev, agents] = await Promise.all([
+  const [curr, prev, agents, rawCalls] = await Promise.all([
     getNumberAnalytics(currFrom, todayStr),
     getNumberAnalytics(prevFrom, prevTo),
     getAgentAnalytics(currFrom, todayStr),
+    getCalls(currFrom, todayStr),
   ])
+
+  // Build daily chart data
+  const dayMap: Record<string, { date: string; inbound: number; outbound: number }> = {}
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now)
+    d.setUTCDate(now.getUTCDate() - i)
+    const key = d.toISOString().split('T')[0]
+    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+    dayMap[key] = { date: label, inbound: 0, outbound: 0 }
+  }
+  rawCalls.forEach(c => {
+    const key = new Date(c.call_date).toISOString().split('T')[0]
+    if (!dayMap[key]) return
+    if (c.direction === 'inbound') dayMap[key].inbound++
+    else dayMap[key].outbound++
+  })
+  const dailyData = Object.values(dayMap)
 
   return (
     <div className="space-y-8">
+
+      {/* ── DAILY VOLUME CHART ─────────────────────────────────────────── */}
+      <section>
+        <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
+          <p className="text-sm font-semibold text-[#1A1A1A] mb-1">Daily Call Volume</p>
+          <p className="text-xs text-gray-400 mb-5">Last 7 days — inbound &amp; outbound per day</p>
+          <CallsVolumeChart data={dailyData} />
+        </div>
+      </section>
 
       {/* ── CALLS OVERVIEW ─────────────────────────────────────────────── */}
       <section>

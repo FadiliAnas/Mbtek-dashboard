@@ -1,6 +1,6 @@
 import { Suspense } from 'react'
 import { getNumberAnalytics, getAgentAnalytics } from '@/lib/justcall-analytics'
-import type { AgentSummary } from '@/lib/justcall-analytics'
+import { AgentPerformanceSection } from '@/components/AgentPerformanceSection'
 
 export const revalidate = 1800
 
@@ -218,44 +218,7 @@ async function CallsData() {
       </section>
 
       {/* ── AGENT LEADERBOARD ──────────────────────────────────────────── */}
-      <section>
-        <SectionHeader title="Agent Performance — Last 7 Days" />
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50 text-left">
-                {['Agent', 'Total', 'Inbound', 'Outbound', 'Answered', 'Answer Rate', 'SLA Rate', 'Missed', 'Connect Rate', 'Avg Duration'].map(h => (
-                  <th key={h} className="px-4 py-3 text-xs font-semibold text-gray-500">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {agents.map((a: AgentSummary, i: number) => (
-                <tr key={a.agent_id} className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${i === 0 ? 'bg-orange-50/30' : ''}`}>
-                  <td className="px-4 py-3 font-medium text-[#1A1A1A]">{a.agent_name}</td>
-                  <td className="px-4 py-3 font-semibold">{a.total_calls}</td>
-                  <td className="px-4 py-3 text-gray-600">{a.incoming_calls}</td>
-                  <td className="px-4 py-3 text-gray-600">{a.outgoing_calls}</td>
-                  <td className="px-4 py-3 text-[#2EB872] font-medium">{a.incoming_answered_calls}</td>
-                  <td className="px-4 py-3">
-                    <span className={`font-semibold ${a.incoming_answer_rate < 50 ? 'text-[#E74C3C]' : a.incoming_answer_rate < 75 ? 'text-[#F39C12]' : 'text-[#2EB872]'}`}>
-                      {a.incoming_calls > 0 ? `${a.incoming_answer_rate}%` : '—'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">{a.incoming_calls > 0 ? `${a.sla_rate_30sec}%` : '—'}</td>
-                  <td className="px-4 py-3 text-[#E74C3C]">{a.incoming_missed_calls || '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className={`font-semibold ${a.outgoing_connect_rate < 80 ? 'text-[#F39C12]' : 'text-[#2EB872]'}`}>
-                      {a.outgoing_calls > 0 ? `${a.outgoing_connect_rate}%` : '—'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">{a.avg_call_duration > 0 ? fmt(a.avg_call_duration) : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <AgentPerformanceSection agents={agents} />
 
     </div>
   )

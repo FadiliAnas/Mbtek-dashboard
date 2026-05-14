@@ -257,3 +257,31 @@ export function InboundTrendChart({
     </ResponsiveContainer>
   )
 }
+
+// Agent performance grouped bar chart
+export function AgentPerformanceChart({
+  data,
+}: {
+  data: {
+    name: string
+    inbound: number
+    outbound: number
+    answered: number
+    missed: number
+  }[]
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(260, data.length * 48)}>
+      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
+        <XAxis type="number" tick={{ fontSize: 11, fill: GRAY }} allowDecimals={false} />
+        <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: DARK }} width={120} />
+        <Tooltip />
+        <Legend />
+        <Bar dataKey="inbound" name="Inbound" fill={ORANGE} radius={[0, 3, 3, 0]} stackId="a" />
+        <Bar dataKey="outbound" name="Outbound" fill="#3B82F6" radius={[0, 3, 3, 0]} stackId="a" />
+        <Bar dataKey="missed" name="Missed" fill="#E74C3C" radius={[0, 3, 3, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}

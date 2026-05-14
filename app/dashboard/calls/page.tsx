@@ -74,6 +74,10 @@ async function CallsData() {
     getCalls(currFrom, todayStr),
   ])
 
+  // Date boundaries for filtering (API may return calls outside the requested range)
+  const weekStart = new Date(currFrom + 'T00:00:00Z')
+  const weekEnd   = new Date(todayStr  + 'T23:59:59Z')
+
   // Build daily chart data
   const dayMap: Record<string, { date: string; inbound: number; outbound: number }> = {}
   for (let i = 6; i >= 0; i--) {
@@ -84,7 +88,9 @@ async function CallsData() {
     dayMap[key] = { date: label, inbound: 0, outbound: 0 }
   }
   rawCalls.forEach(c => {
-    const key = new Date(c.call_date).toISOString().split('T')[0]
+    const d = new Date(c.call_date)
+    if (d < weekStart || d > weekEnd) return
+    const key = d.toISOString().split('T')[0]
     if (!dayMap[key]) return
     if (c.direction === 'inbound') dayMap[key].inbound++
     else dayMap[key].outbound++
@@ -99,6 +105,8 @@ async function CallsData() {
   ]
   const ivrCounts: Record<string, number> = { '1': 0, '2': 0, '3': 0 }
   rawCalls.forEach(c => {
+    const d = new Date(c.call_date)
+    if (d < weekStart || d > weekEnd) return
     if (c.direction === 'inbound' && c.ivr_digit && ivrCounts[c.ivr_digit] !== undefined) {
       ivrCounts[c.ivr_digit]++
     }

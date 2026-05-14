@@ -215,3 +215,45 @@ export function PipelineStageChart({ data }: { data: { stage: string; count: num
     </ResponsiveContainer>
   )
 }
+
+// Calls volume over time — inbound + outbound by day
+export function CallsVolumeChart({
+  data,
+}: {
+  data: { date: string; inbound: number; outbound: number }[]
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <LineChart data={data} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+        <XAxis dataKey="date" tick={{ fontSize: 11, fill: GRAY }} />
+        <YAxis tick={{ fontSize: 11, fill: GRAY }} allowDecimals={false} />
+        <Tooltip />
+        <Legend />
+        <Line type="monotone" dataKey="inbound" name="Inbound" stroke={GREEN} strokeWidth={2} dot={{ r: 3 }} />
+        <Line type="monotone" dataKey="outbound" name="Outbound" stroke={ORANGE} strokeWidth={2} dot={{ r: 3 }} />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
+// Inbound answered vs missed over time
+export function InboundTrendChart({
+  data,
+}: {
+  data: { date: string; answered: number; missed: number }[]
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <LineChart data={data} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+        <XAxis dataKey="date" tick={{ fontSize: 11, fill: GRAY }} />
+        <YAxis tick={{ fontSize: 11, fill: GRAY }} allowDecimals={false} />
+        <Tooltip />
+        <Legend />
+        <Line type="monotone" dataKey="answered" name="Answered" stroke={GREEN} strokeWidth={2} dot={{ r: 3 }} />
+        <Line type="monotone" dataKey="missed" name="Missed" stroke={RED} strokeWidth={2} dot={{ r: 3 }} />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}

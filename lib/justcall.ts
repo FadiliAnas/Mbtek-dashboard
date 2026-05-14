@@ -77,20 +77,26 @@ function normalizeCall(raw: RawJCCall): JCCall {
   }
 }
 
-// Fetches ALL calls between from/to — no page cap
+// Fetches ALL calls between from/to using total_count to guard against early pagination stops
 export async function getCalls(from: string, to: string): Promise<JCCall[]> {
   const all: JCCall[] = []
   let page = 1
-  let hasMore = true
+  let totalCount: number | null = null
 
-  while (hasMore) {
+  while (true) {
     const qs = new URLSearchParams({ from, to, per_page: '100', page: String(page) })
     const data = await justcallFetch(`/calls?${qs}`)
+
+    if (totalCount === null) totalCount = data.total_count ?? 0
+
     const raws: RawJCCall[] = data.data ?? []
+    if (raws.length === 0) break
+
     all.push(...raws.map(normalizeCall))
-    hasMore = raws.length === 100
+
+    if (all.length >= (totalCount ?? 0)) break
     page++
-    if (hasMore) await sleep(250)
+    await sleep(250)
   }
 
   return all

@@ -6,9 +6,17 @@ const SESSION_COOKIE = 'mbtek_dash_session'
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Let login page and auth API through
+  // Let login page, auth API, and authorized sync requests through
   if (pathname.startsWith('/login') || pathname.startsWith('/api/auth')) {
     return NextResponse.next()
+  }
+
+  if (pathname === '/api/sync') {
+    const auth = request.headers.get('authorization')
+    const secret = process.env.CRON_SECRET
+    if (secret && auth === `Bearer ${secret}`) {
+      return NextResponse.next()
+    }
   }
 
   const session = request.cookies.get(SESSION_COOKIE)

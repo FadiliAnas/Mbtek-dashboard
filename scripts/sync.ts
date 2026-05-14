@@ -207,9 +207,9 @@ async function syncCalls() {
 
   let total = 0
   let page = 1
-  let hasMore = true
+  let totalCount: number | null = null
 
-  while (hasMore) {
+  while (true) {
     const qs = new URLSearchParams({ from, to, per_page: '100', page: String(page) })
     let data: any
     try {
@@ -219,29 +219,31 @@ async function syncCalls() {
       break
     }
 
-    const raws: any[] = data.data ?? []
-    if (raws.length > 0) {
-      await upsert('justcall_calls', raws.map((r: any) => {
-        const dir = (r.call_info?.direction ?? '').toLowerCase()
-        const typ = (r.call_info?.type ?? '').toLowerCase()
-        return {
-          id: String(r.id),
-          direction: dir.startsWith('in') ? 'inbound' : 'outbound',
-          status: typ === 'not_answered' ? 'missed' : (typ || 'unknown'),
-          duration: r.call_duration?.total_duration ?? 0,
-          call_date: r.call_date && r.call_time ? `${r.call_date}T${r.call_time}Z` : (r.call_date ?? null),
-          ivr_digit: r.ivr_info?.digit_pressed || null,
-          agent_name: r.agent_name ?? null,
-          synced_at,
-        }
-      }))
-      total += raws.length
-    }
+    if (totalCount === null) totalCount = data.total_count ?? 0
 
-    hasMore = raws.length === 100
+    const raws: any[] = data.data ?? []
+    if (raws.length === 0) break
+
+    await upsert('justcall_calls', raws.map((r: any) => {
+      const dir = (r.call_info?.direction ?? '').toLowerCase()
+      const typ = (r.call_info?.type ?? '').toLowerCase()
+      return {
+        id: String(r.id),
+        direction: dir.startsWith('in') ? 'inbound' : 'outbound',
+        status: typ === 'not_answered' ? 'missed' : (typ || 'unknown'),
+        duration: r.call_duration?.total_duration ?? 0,
+        call_date: r.call_date && r.call_time ? `${r.call_date}T${r.call_time}Z` : (r.call_date ?? null),
+        ivr_digit: r.ivr_info?.digit_pressed || null,
+        agent_name: r.agent_name ?? null,
+        synced_at,
+      }
+    }))
+    total += raws.length
+
+    if (total >= (totalCount ?? 0)) break
     page++
-    if (hasMore) await sleep(250)
-    if (page % 10 === 0) log(`  Calls: ${total} so far...`)
+    await sleep(250)
+    if (page % 10 === 0) log(`  Calls: ${total} / ${totalCount} so far...`)
   }
 
   log(`✓ Calls: ${total} total`)

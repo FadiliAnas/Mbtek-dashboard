@@ -3,9 +3,8 @@ import { getPipelines, getOpportunities, getContacts } from '@/lib/ghl'
 import { getCalls } from '@/lib/justcall'
 import { supabase } from '@/lib/supabase'
 
-// Vercel Cron + manual trigger
-// Cron: every hour via vercel.json
-// Manual: POST /api/sync  (no auth needed locally, CRON_SECRET required in production)
+// Vercel Cron calls this daily at midnight EST with Authorization: Bearer <CRON_SECRET>
+// Manual full resync: POST /api/sync?full=true
 export const maxDuration = 300
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -38,15 +37,18 @@ export async function POST(request: Request) {
 }
 
 async function handleSync(request: Request) {
-  // Auth check — required in production (Vercel Cron sends this header)
   const cronSecret = process.env.CRON_SECRET
   if (cronSecret) {
     const auth = request.headers.get('authorization')
-    // Allow unauthenticated in dev (no CRON_SECRET set) or if header matches
     if (auth !== `Bearer ${cronSecret}` && process.env.NODE_ENV === 'production') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
   }
+
+  const url = new URL(request.url)
+  // Daily cron uses incremental (last 2 days). Pass ?full=true for a complete historical resync.
+  const isFull = url.searchParams.get('full') === 'true'
+  const callDays = isFull ? 365 : 2
 
   const started = Date.now()
   const results: Record<string, number | string> = {}
@@ -66,7 +68,8 @@ async function handleSync(request: Request) {
 
     // ── 2. GHL Opportunities ──────────────────────────────────────────────
     console.log('[sync] fetching opportunities...')
-    const opportunities = await getOpportunities()
+    const rawOpportunities = await getOpportunities()
+    const opportunities = [...new Map(rawOpportunities.map((o) => [o.id, o])).values()]
     const oppRows = opportunities.map((o) => ({
       id: String(o.id),
       name: o.name,
@@ -100,13 +103,13 @@ async function handleSync(request: Request) {
     results.contacts = await upsertBatched('ghl_contacts', contactRows)
     console.log(`[sync] contacts: ${results.contacts}`)
 
-    // ── 4. JustCall Calls (last 90 days) ───────────────────────────────────
-    console.log('[sync] fetching calls...')
+    // ── 4. JustCall Calls ─────────────────────────────────────────────────
+    console.log(`[sync] fetching calls (last ${callDays} days)...`)
     const now = new Date()
-    const yearAgo = new Date()
-    yearAgo.setDate(now.getDate() - 365)
+    const fromDate = new Date()
+    fromDate.setDate(now.getDate() - callDays)
     const calls = await getCalls(
-      yearAgo.toISOString().split('T')[0],
+      fromDate.toISOString().split('T')[0],
       now.toISOString().split('T')[0]
     )
     const callRows = calls.map((c) => ({
@@ -122,10 +125,9 @@ async function handleSync(request: Request) {
     results.calls = await upsertBatched('justcall_calls', callRows)
     console.log(`[sync] calls: ${results.calls}`)
 
-    // ── Log success ────────────────────────────────────────────────────────
     const duration_ms = Date.now() - started
     await supabase.from('sync_log').insert({
-      source: 'full',
+      source: isFull ? 'full' : 'incremental',
       records_synced:
         Number(results.pipelines) +
         Number(results.opportunities) +
@@ -135,16 +137,12 @@ async function handleSync(request: Request) {
       duration_ms,
     })
 
-    return NextResponse.json({
-      ok: true,
-      duration_ms,
-      synced: results,
-    })
+    return NextResponse.json({ ok: true, mode: isFull ? 'full' : 'incremental', duration_ms, synced: results })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[sync] error:', msg)
     await supabase.from('sync_log').insert({
-      source: 'full',
+      source: isFull ? 'full' : 'incremental',
       completed_at: new Date().toISOString(),
       duration_ms: Date.now() - started,
       error: msg,

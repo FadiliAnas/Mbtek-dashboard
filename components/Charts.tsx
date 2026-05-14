@@ -258,6 +258,35 @@ export function InboundTrendChart({
   )
 }
 
+// IVR selection donut chart
+export function IVRPieChart({ data }: { data: { name: string; count: number; color: string }[] }) {
+  const total = data.reduce((s, d) => s + d.count, 0)
+  return (
+    <ResponsiveContainer width="100%" height={260}>
+      <PieChart>
+        <Pie
+          data={data}
+          dataKey="count"
+          nameKey="name"
+          cx="50%"
+          cy="50%"
+          innerRadius={65}
+          outerRadius={100}
+          paddingAngle={3}
+          label={({ name, value }) => `${name}: ${total > 0 ? Math.round((Number(value) / total) * 100) : 0}%`}
+          labelLine={false}
+        >
+          {data.map((d, i) => (
+            <Cell key={i} fill={d.color} />
+          ))}
+        </Pie>
+        <Tooltip formatter={(v) => [Number(v), 'Calls']} />
+        <Legend />
+      </PieChart>
+    </ResponsiveContainer>
+  )
+}
+
 // Agent performance grouped bar chart
 export function AgentPerformanceChart({
   data,

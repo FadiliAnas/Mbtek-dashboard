@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import { getNumberAnalytics, getAgentAnalytics } from '@/lib/justcall-analytics'
 import { AgentPerformanceSection } from '@/components/AgentPerformanceSection'
-import { CallsVolumeChart } from '@/components/Charts'
+import { CallsVolumeChart, IVRPieChart } from '@/components/Charts'
 import { getCalls } from '@/lib/justcall'
 
 export const revalidate = 1800
@@ -90,6 +90,21 @@ async function CallsData() {
     else dayMap[key].outbound++
   })
   const dailyData = Object.values(dayMap)
+
+  // IVR selection breakdown — inbound calls that pressed 1, 2 or 3
+  const IVR_OPTIONS = [
+    { digit: '1', name: 'Sales',              color: '#F26522' },
+    { digit: '2', name: 'Client Care',        color: '#2EB872' },
+    { digit: '3', name: 'Technical Support',  color: '#3B82F6' },
+  ]
+  const ivrCounts: Record<string, number> = { '1': 0, '2': 0, '3': 0 }
+  rawCalls.forEach(c => {
+    if (c.direction === 'inbound' && c.ivr_digit && ivrCounts[c.ivr_digit] !== undefined) {
+      ivrCounts[c.ivr_digit]++
+    }
+  })
+  const ivrTotal = Object.values(ivrCounts).reduce((a, b) => a + b, 0)
+  const ivrData = IVR_OPTIONS.map(o => ({ ...o, count: ivrCounts[o.digit] }))
 
   return (
     <div className="space-y-8">
@@ -243,6 +258,43 @@ async function CallsData() {
             value={fmt(curr.avg_call_duration)}
             change={changePct(curr.avg_call_duration, prev.avg_call_duration)}
           />
+        </div>
+      </section>
+
+      {/* ── IVR SELECTION ──────────────────────────────────────────────── */}
+      <section>
+        <SectionHeader title="ML IVR — Selection Breakdown" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Stat cards */}
+          <div className="space-y-3">
+            {ivrData.map(o => (
+              <div key={o.digit} className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm flex items-center gap-4">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-lg shrink-0" style={{ backgroundColor: o.color }}>
+                  {o.digit}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-500">{o.name}</p>
+                  <p className="text-2xl font-bold text-[#1A1A1A]">{o.count}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-semibold" style={{ color: o.color }}>
+                    {ivrTotal > 0 ? Math.round((o.count / ivrTotal) * 100) : 0}%
+                  </p>
+                  <div className="w-20 bg-gray-100 rounded-full h-2 mt-1">
+                    <div className="h-2 rounded-full" style={{ width: `${ivrTotal > 0 ? (o.count / ivrTotal) * 100 : 0}%`, backgroundColor: o.color }} />
+                  </div>
+                </div>
+              </div>
+            ))}
+            <p className="text-xs text-gray-400 pl-1">{ivrTotal} total IVR selections this week</p>
+          </div>
+          {/* Donut chart */}
+          <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm flex items-center justify-center">
+            {ivrTotal > 0
+              ? <IVRPieChart data={ivrData} />
+              : <p className="text-sm text-gray-400">No IVR data this week</p>
+            }
+          </div>
         </div>
       </section>
 

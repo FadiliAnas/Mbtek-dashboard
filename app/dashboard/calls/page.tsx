@@ -1,8 +1,9 @@
 import { Suspense } from 'react'
+import { getNumberAnalytics, getAgentAnalytics } from '@/lib/justcall-analytics'
 import { getCalls } from '@/lib/justcall'
 import { CallsVolumeChart, InboundTrendChart, IVRBreakdownChart } from '@/components/Charts'
 
-// Re-fetch from JustCall API every 30 minutes so numbers match their dashboard
+// Refresh every 30 minutes — matches JustCall's own dashboard refresh cadence
 export const revalidate = 1800
 
 const IVR_LABELS: Record<string, string> = {
@@ -24,11 +25,6 @@ function pct(a: number, b: number) {
 function changePct(curr: number, prev: number) {
   if (prev === 0) return null
   return Math.round(((curr - prev) / prev) * 100)
-}
-
-function isAfterHours(callDate: string) {
-  const h = (new Date(callDate).getUTCHours() - 4 + 24) % 24
-  return h < 8 || h >= 18
 }
 
 function dayLabel(iso: string) {
@@ -68,7 +64,6 @@ function StatCard({
   )
 }
 
-// ── Section header ───────────────────────────────────────────────────────────
 function SectionHeader({ title }: { title: string }) {
   return (
     <div className="flex items-center justify-between mb-4">
@@ -79,7 +74,7 @@ function SectionHeader({ title }: { title: string }) {
 
 // ── Main data component ──────────────────────────────────────────────────────
 async function CallsData() {
-  // "Last 7 Days" = today + 6 prior days (same definition as JustCall dashboard)
+  // "Last 7 Days" = today + prior 6 calendar days (matches JustCall's definition)
   const now = new Date()
   const todayStr = now.toISOString().split('T')[0]
 
@@ -94,74 +89,16 @@ async function CallsData() {
   const prevFrom = prevStart.toISOString().split('T')[0]
   const prevTo = prevEnd.toISOString().split('T')[0]
 
-  // Fetch both periods in parallel directly from JustCall (same source as their dashboard)
-  const [curr, prev] = await Promise.all([
+  // Fetch pre-aggregated analytics + raw calls (for IVR & volume charts) in parallel
+  const [curr, prev, agents, rawCalls] = await Promise.all([
+    getNumberAnalytics(currFrom, todayStr),
+    getNumberAnalytics(prevFrom, prevTo),
+    getAgentAnalytics(currFrom, todayStr),
     getCalls(currFrom, todayStr),
-    getCalls(prevFrom, prevTo),
   ])
 
-  // ── Overview ────────────────────────────────────────────────────────────
-  const currIn  = curr.filter(c => c.direction === 'inbound')
-  const currOut = curr.filter(c => c.direction === 'outbound')
-  const currAnswered = curr.filter(c => c.status === 'answered')
-
-  const prevIn  = prev.filter(c => c.direction === 'inbound')
-  const prevOut = prev.filter(c => c.direction === 'outbound')
-  const prevAnswered = prev.filter(c => c.status === 'answered')
-
-  // "Missed" = everything not answered or voicemail (missed + abandoned + busy)
-  // — matches JustCall's definition which includes Abandoned Before Ringing
-  const isNotReached = (s: string) => !['answered', 'voicemail'].includes(s)
-  const currNotReached = curr.filter(c => isNotReached(c.status))
-  const prevNotReached = prev.filter(c => isNotReached(c.status))
-
-  // Answer rate = inbound answered / total inbound (JustCall definition)
-  const inboundAnswered = currIn.filter(c => c.status === 'answered')
-  const prevInboundAnswered = prevIn.filter(c => c.status === 'answered')
-  const answerRate = pct(inboundAnswered.length, currIn.length)
-  const prevAnswerRate = pct(prevInboundAnswered.length, prevIn.length)
-
-  // ── Inbound detail ───────────────────────────────────────────────────────
-  const inboundNotReached = currIn.filter(c => isNotReached(c.status))
-  const inboundAbandoned  = currIn.filter(c => c.status === 'abandoned')
-  const inboundAnswerRate = answerRate
-
-  const inAnsweredDur = inboundAnswered.map(c => c.duration).filter(d => d > 0)
-  const avgInDuration = inAnsweredDur.length
-    ? inAnsweredDur.reduce((a, b) => a + b, 0) / inAnsweredDur.length
-    : 0
-
-  const allAnsweredDur = currAnswered.map(c => c.duration).filter(d => d > 0)
-  const avgDuration = allAnsweredDur.length
-    ? allAnsweredDur.reduce((a, b) => a + b, 0) / allAnsweredDur.length
-    : 0
-
-  const prevInAnswerRate = pct(prevInboundAnswered.length, prevIn.length)
-  const prevInDur = prevInboundAnswered.map(c => c.duration).filter(d => d > 0)
-  const prevAvgInDur = prevInDur.length ? prevInDur.reduce((a, b) => a + b, 0) / prevInDur.length : 0
-
-  // ── Missed calls detail ──────────────────────────────────────────────────
-  // After/during hours applies to all not-reached inbound calls
-  const notReachedInbound = currIn.filter(c => isNotReached(c.status))
-  const missedAfterHours  = notReachedInbound.filter(c => isAfterHours(c.call_date))
-  const missedDuringHours = notReachedInbound.filter(c => !isAfterHours(c.call_date))
-  const abandoned = curr.filter(c => c.status === 'abandoned')
-
-  const prevMissedAfterHours = prevIn.filter(c => isNotReached(c.status) && isAfterHours(c.call_date))
-
-  // ── Outbound detail ──────────────────────────────────────────────────────
-  const outAnswered = currOut.filter(c => c.status === 'answered')
-  const connectRate = pct(outAnswered.length, currOut.length)
-  const prevOutAnswered = prevOut.filter(c => c.status === 'answered')
-  const prevConnectRate = pct(prevOutAnswered.length, prevOut.length)
-
-  const outDur = outAnswered.map(c => c.duration).filter(d => d > 0)
-  const avgOutDuration = outDur.length ? outDur.reduce((a, b) => a + b, 0) / outDur.length : 0
-  const prevOutDur = prevOutAnswered.map(c => c.duration).filter(d => d > 0)
-  const prevAvgOutDur = prevOutDur.length ? prevOutDur.reduce((a, b) => a + b, 0) / prevOutDur.length : 0
-
-  // ── IVR breakdown ────────────────────────────────────────────────────────
-  const ivrCalls = currIn.filter(c => c.ivr_digit)
+  // ── IVR breakdown from raw calls ────────────────────────────────────────
+  const ivrCalls = rawCalls.filter(c => c.direction === 'inbound' && c.ivr_digit)
   const ivrAgg: Record<string, number> = {}
   ivrCalls.forEach(c => { ivrAgg[c.ivr_digit!] = (ivrAgg[c.ivr_digit!] ?? 0) + 1 })
   const ivrData = Object.entries(ivrAgg)
@@ -172,45 +109,26 @@ async function CallsData() {
     }))
     .sort((a, b) => b.count - a.count)
 
-  // ── Volume over time (by day) ────────────────────────────────────────────
+  // ── Volume over time chart (last 7 days, by day) ─────────────────────────
   const dayMap: Record<string, { inbound: number; outbound: number; answered: number; missed: number }> = {}
   for (let i = 6; i >= 0; i--) {
-    const d = new Date(); d.setDate(now.getDate() - i)
+    const d = new Date(now)
+    d.setUTCDate(now.getUTCDate() - i)
     const key = d.toISOString().split('T')[0]
     dayMap[key] = { inbound: 0, outbound: 0, answered: 0, missed: 0 }
   }
-  curr.forEach(c => {
+  rawCalls.forEach(c => {
     const key = new Date(c.call_date).toISOString().split('T')[0]
     if (!dayMap[key]) return
     if (c.direction === 'inbound') {
       dayMap[key].inbound++
       if (c.status === 'answered') dayMap[key].answered++
-      if (isNotReached(c.status)) dayMap[key].missed++
+      else if (!['voicemail'].includes(c.status)) dayMap[key].missed++
     } else {
       dayMap[key].outbound++
     }
   })
   const volumeData = Object.entries(dayMap).map(([date, v]) => ({ date: dayLabel(date), ...v }))
-
-  // ── Agent leaderboard ────────────────────────────────────────────────────
-  const agentMap: Record<string, { total: number; inbound: number; outbound: number; answered: number; missed: number; duration: number }> = {}
-  curr.forEach(c => {
-    const a = c.agent_name || 'Unknown'
-    if (!agentMap[a]) agentMap[a] = { total: 0, inbound: 0, outbound: 0, answered: 0, missed: 0, duration: 0 }
-    agentMap[a].total++
-    if (c.direction === 'inbound') agentMap[a].inbound++
-    else agentMap[a].outbound++
-    if (c.status === 'answered') { agentMap[a].answered++; agentMap[a].duration += c.duration ?? 0 }
-    if (c.status === 'missed') agentMap[a].missed++
-  })
-  const agents = Object.entries(agentMap)
-    .map(([name, s]) => ({
-      name,
-      ...s,
-      answerRate: pct(s.answered, s.total),
-      avgDuration: s.answered > 0 ? Math.round(s.duration / s.answered) : 0,
-    }))
-    .sort((a, b) => b.total - a.total)
 
   return (
     <div className="space-y-8">
@@ -221,27 +139,27 @@ async function CallsData() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <StatCard
             label="Inbound Calls"
-            value={currIn.length}
-            change={changePct(currIn.length, prevIn.length)}
-            sub={`prev: ${prevIn.length}`}
+            value={curr.incoming_calls}
+            change={changePct(curr.incoming_calls, prev.incoming_calls)}
+            sub={`prev: ${prev.incoming_calls}`}
           />
           <StatCard
             label="Outbound Calls"
-            value={currOut.length}
-            change={changePct(currOut.length, prevOut.length)}
-            sub={`prev: ${prevOut.length}`}
+            value={curr.outgoing_calls}
+            change={changePct(curr.outgoing_calls, prev.outgoing_calls)}
+            sub={`prev: ${prev.outgoing_calls}`}
           />
           <StatCard
             label="Missed Calls"
-            value={currNotReached.length}
-            change={changePct(currNotReached.length, prevNotReached.length)}
-            color={currNotReached.length > 30 ? 'text-[#E74C3C]' : 'text-[#1A1A1A]'}
+            value={curr.incoming_missed_calls}
+            change={changePct(curr.incoming_missed_calls, prev.incoming_missed_calls)}
+            color={curr.incoming_missed_calls > 30 ? 'text-[#E74C3C]' : 'text-[#1A1A1A]'}
           />
           <StatCard
             label="Answer Rate"
-            value={`${answerRate}%`}
-            change={changePct(answerRate, prevAnswerRate)}
-            color={answerRate < 60 ? 'text-[#E74C3C]' : 'text-[#2EB872]'}
+            value={`${curr.incoming_answer_rate}%`}
+            change={changePct(curr.incoming_answer_rate, prev.incoming_answer_rate)}
+            color={curr.incoming_answer_rate < 60 ? 'text-[#E74C3C]' : 'text-[#2EB872]'}
           />
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
@@ -256,84 +174,87 @@ async function CallsData() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
           <StatCard
             label="Inbound Calls"
-            value={currIn.length}
-            change={changePct(currIn.length, prevIn.length)}
+            value={curr.incoming_calls}
+            change={changePct(curr.incoming_calls, prev.incoming_calls)}
           />
           <StatCard
             label="Answer Rate"
-            value={`${inboundAnswerRate}%`}
-            change={changePct(inboundAnswerRate, prevInAnswerRate)}
-            color={inboundAnswerRate < 60 ? 'text-[#E74C3C]' : 'text-[#2EB872]'}
+            value={`${curr.incoming_answer_rate}%`}
+            change={changePct(curr.incoming_answer_rate, prev.incoming_answer_rate)}
+            color={curr.incoming_answer_rate < 60 ? 'text-[#E74C3C]' : 'text-[#2EB872]'}
           />
           <StatCard
-            label="Not Reached"
-            value={inboundNotReached.length}
-            change={changePct(inboundNotReached.length, prevIn.filter(c => isNotReached(c.status)).length)}
+            label="Missed Calls"
+            value={curr.incoming_missed_calls}
+            change={changePct(curr.incoming_missed_calls, prev.incoming_missed_calls)}
             color="text-[#E74C3C]"
           />
           <StatCard
-            label="Abandoned"
-            value={inboundAbandoned.length}
-            sub={`${pct(inboundAbandoned.length, currIn.length)}% of inbound`}
-            color="text-[#F39C12]"
+            label="SLA Rate (30s)"
+            value={`${curr.sla_rate_30sec}%`}
+            change={changePct(curr.sla_rate_30sec, prev.sla_rate_30sec)}
+            color={curr.sla_rate_30sec < 70 ? 'text-[#F39C12]' : 'text-[#2EB872]'}
           />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <StatCard
-            label="Avg Call Duration"
-            value={fmt(avgInDuration)}
-            change={changePct(Math.round(avgInDuration), Math.round(prevAvgInDur))}
+            label="Avg Ring Time"
+            value={fmt(curr.avg_ring_time)}
+            change={changePct(curr.avg_ring_time, prev.avg_ring_time)}
           />
-          <StatCard label="Avg Talk Time" value={fmt(avgDuration)} sub="all answered" />
+          <StatCard
+            label="Avg Queue Time"
+            value={fmt(curr.avg_queue_time)}
+            change={changePct(curr.avg_queue_time, prev.avg_queue_time)}
+          />
+          <StatCard
+            label="Avg Talk Time"
+            value={fmt(curr.avg_talk_time)}
+            change={changePct(curr.avg_talk_time, prev.avg_talk_time)}
+          />
           <StatCard
             label="Voicemails"
-            value={curr.filter(c => c.status === 'voicemail').length}
-            sub="this week"
+            value={curr.voicemails_received}
+            change={changePct(curr.voicemails_received, prev.voicemails_received)}
             color="text-[#F39C12]"
-          />
-          <StatCard
-            label="IVR Routed"
-            value={ivrCalls.length}
-            sub={`${pct(ivrCalls.length, currIn.length)}% of inbound`}
           />
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
-          <p className="text-xs font-semibold text-gray-500 mb-4">INBOUND CALLS OVER TIME — ANSWERED VS MISSED</p>
+          <p className="text-xs font-semibold text-gray-500 mb-4">INBOUND — ANSWERED VS MISSED</p>
           <InboundTrendChart data={volumeData} />
         </div>
       </section>
 
-      {/* ── MISSED CALLS ───────────────────────────────────────────────── */}
+      {/* ── MISSED CALLS DISTRIBUTION ───────────────────────────────────── */}
       <section>
-        <SectionHeader title="Missed Calls Distribution" />
+        <SectionHeader title="Inbound Missed Calls Distribution" />
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <StatCard
             label="Total Missed"
-            value={currNotReached.length}
-            change={changePct(currNotReached.length, prevNotReached.length)}
+            value={curr.incoming_missed_calls}
+            change={changePct(curr.incoming_missed_calls, prev.incoming_missed_calls)}
             color="text-[#E74C3C]"
           />
           <StatCard
             label="After Office Hours"
-            value={missedAfterHours.length}
-            change={changePct(missedAfterHours.length, prevMissedAfterHours.length)}
-            sub="outside 8am–6pm ET"
+            value={curr.missed_after_office_hours}
+            change={changePct(curr.missed_after_office_hours, prev.missed_after_office_hours)}
+            sub="outside business hours"
           />
           <StatCard
             label="During Office Hours"
-            value={missedDuringHours.length}
-            sub="8am–6pm ET"
-            color={missedDuringHours.length > 10 ? 'text-[#E74C3C]' : 'text-[#1A1A1A]'}
+            value={curr.missed_during_agent_hours}
+            change={changePct(curr.missed_during_agent_hours, prev.missed_during_agent_hours)}
+            color={curr.missed_during_agent_hours > 10 ? 'text-[#E74C3C]' : 'text-[#1A1A1A]'}
           />
           <StatCard
-            label="Abandoned"
-            value={abandoned.length}
-            sub="hung up before answer"
+            label="Abandoned Before Ringing"
+            value={curr.missed_abandoned_before_ringing}
+            change={changePct(curr.missed_abandoned_before_ringing, prev.missed_abandoned_before_ringing)}
             color="text-[#F39C12]"
           />
         </div>
 
-        {/* IVR breakdown */}
         {ivrData.length > 0 && (
           <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
             <p className="text-xs font-semibold text-gray-500 mb-4">IVR ROUTING BREAKDOWN</p>
@@ -365,25 +286,25 @@ async function CallsData() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             label="Outbound Calls"
-            value={currOut.length}
-            change={changePct(currOut.length, prevOut.length)}
+            value={curr.outgoing_calls}
+            change={changePct(curr.outgoing_calls, prev.outgoing_calls)}
           />
           <StatCard
             label="Connect Rate"
-            value={`${connectRate}%`}
-            change={changePct(connectRate, prevConnectRate)}
-            color={connectRate > 80 ? 'text-[#2EB872]' : 'text-[#F39C12]'}
+            value={`${curr.outgoing_connect_rate}%`}
+            change={changePct(curr.outgoing_connect_rate, prev.outgoing_connect_rate)}
+            color={curr.outgoing_connect_rate > 80 ? 'text-[#2EB872]' : 'text-[#F39C12]'}
+          />
+          <StatCard
+            label="Connected"
+            value={curr.outgoing_connected_calls}
+            sub={`${curr.outgoing_not_connected_calls} not reached`}
+            color="text-[#2EB872]"
           />
           <StatCard
             label="Avg Call Duration"
-            value={fmt(avgOutDuration)}
-            change={changePct(Math.round(avgOutDuration), Math.round(prevAvgOutDur))}
-          />
-          <StatCard
-            label="Not Reached"
-            value={currOut.length - outAnswered.length}
-            sub={`${100 - connectRate}% of outbound`}
-            color="text-[#E74C3C]"
+            value={fmt(curr.avg_call_duration)}
+            change={changePct(curr.avg_call_duration, prev.avg_call_duration)}
           />
         </div>
       </section>
@@ -395,26 +316,31 @@ async function CallsData() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50 text-left">
-                {['Agent', 'Total', 'Inbound', 'Outbound', 'Answered', 'Answer Rate', 'Missed', 'Avg Duration'].map(h => (
+                {['Agent', 'Total', 'Inbound', 'Outbound', 'Answered', 'Answer Rate', 'Missed', 'Connect Rate', 'Avg Duration'].map(h => (
                   <th key={h} className="px-4 py-3 text-xs font-semibold text-gray-500">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {agents.map((a, i) => (
-                <tr key={a.name} className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${i === 0 ? 'bg-orange-50/30' : ''}`}>
-                  <td className="px-4 py-3 font-medium text-[#1A1A1A]">{a.name}</td>
-                  <td className="px-4 py-3 font-semibold">{a.total}</td>
-                  <td className="px-4 py-3 text-gray-600">{a.inbound}</td>
-                  <td className="px-4 py-3 text-gray-600">{a.outbound}</td>
-                  <td className="px-4 py-3 text-[#2EB872] font-medium">{a.answered}</td>
+                <tr key={a.agent_id} className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${i === 0 ? 'bg-orange-50/30' : ''}`}>
+                  <td className="px-4 py-3 font-medium text-[#1A1A1A]">{a.agent_name}</td>
+                  <td className="px-4 py-3 font-semibold">{a.total_calls}</td>
+                  <td className="px-4 py-3 text-gray-600">{a.incoming_calls}</td>
+                  <td className="px-4 py-3 text-gray-600">{a.outgoing_calls}</td>
+                  <td className="px-4 py-3 text-[#2EB872] font-medium">{a.incoming_answered_calls}</td>
                   <td className="px-4 py-3">
-                    <span className={`font-semibold ${a.answerRate < 50 ? 'text-[#E74C3C]' : a.answerRate < 75 ? 'text-[#F39C12]' : 'text-[#2EB872]'}`}>
-                      {a.answerRate}%
+                    <span className={`font-semibold ${a.incoming_answer_rate < 50 ? 'text-[#E74C3C]' : a.incoming_answer_rate < 75 ? 'text-[#F39C12]' : 'text-[#2EB872]'}`}>
+                      {a.incoming_answer_rate}%
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-[#E74C3C]">{a.missed}</td>
-                  <td className="px-4 py-3 text-gray-600">{a.avgDuration > 0 ? fmt(a.avgDuration) : '—'}</td>
+                  <td className="px-4 py-3 text-[#E74C3C]">{a.incoming_missed_calls}</td>
+                  <td className="px-4 py-3">
+                    <span className={`font-semibold ${a.outgoing_connect_rate < 80 ? 'text-[#F39C12]' : 'text-[#2EB872]'}`}>
+                      {a.outgoing_calls > 0 ? `${a.outgoing_connect_rate}%` : '—'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-600">{a.avg_call_duration > 0 ? fmt(a.avg_call_duration) : '—'}</td>
                 </tr>
               ))}
             </tbody>

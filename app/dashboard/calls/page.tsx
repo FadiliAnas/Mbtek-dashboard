@@ -1,8 +1,9 @@
 import { Suspense } from 'react'
-import { dbGetCalls } from '@/lib/db'
+import { getCalls } from '@/lib/justcall'
 import { CallsVolumeChart, InboundTrendChart, IVRBreakdownChart } from '@/components/Charts'
 
-export const dynamic = 'force-dynamic'
+// Re-fetch from JustCall API every 30 minutes so numbers match their dashboard
+export const revalidate = 1800
 
 const IVR_LABELS: Record<string, string> = {
   '1': 'Sales',
@@ -78,14 +79,26 @@ function SectionHeader({ title }: { title: string }) {
 
 // ── Main data component ──────────────────────────────────────────────────────
 async function CallsData() {
-  const calls = await dbGetCalls(21)
-
+  // "Last 7 Days" = today + 6 prior days (same definition as JustCall dashboard)
   const now = new Date()
-  const d7 = new Date(); d7.setDate(now.getDate() - 7)
-  const d14 = new Date(); d14.setDate(now.getDate() - 14)
+  const todayStr = now.toISOString().split('T')[0]
 
-  const curr = calls.filter(c => new Date(c.call_date) >= d7)
-  const prev = calls.filter(c => new Date(c.call_date) >= d14 && new Date(c.call_date) < d7)
+  const currStart = new Date(now)
+  currStart.setUTCDate(now.getUTCDate() - 6)
+  const currFrom = currStart.toISOString().split('T')[0]
+
+  const prevEnd = new Date(currStart)
+  prevEnd.setUTCDate(prevEnd.getUTCDate() - 1)
+  const prevStart = new Date(prevEnd)
+  prevStart.setUTCDate(prevEnd.getUTCDate() - 6)
+  const prevFrom = prevStart.toISOString().split('T')[0]
+  const prevTo = prevEnd.toISOString().split('T')[0]
+
+  // Fetch both periods in parallel directly from JustCall (same source as their dashboard)
+  const [curr, prev] = await Promise.all([
+    getCalls(currFrom, todayStr),
+    getCalls(prevFrom, prevTo),
+  ])
 
   // ── Overview ────────────────────────────────────────────────────────────
   const currIn  = curr.filter(c => c.direction === 'inbound')

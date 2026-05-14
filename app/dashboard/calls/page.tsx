@@ -54,10 +54,15 @@ function SectionHeader({ title }: { title: string }) {
 
 async function CallsData() {
   const now = new Date()
-  const todayStr = now.toISOString().split('T')[0]
 
-  const currStart = new Date(now)
-  currStart.setUTCDate(now.getUTCDate() - 6)
+  // Use last 7 *completed* days (ending yesterday) — matches the XLSX export
+  // and avoids 400 errors from analytics API when passing today as to_date
+  const yesterday = new Date(now)
+  yesterday.setUTCDate(now.getUTCDate() - 1)
+  const currTo   = yesterday.toISOString().split('T')[0]
+
+  const currStart = new Date(yesterday)
+  currStart.setUTCDate(yesterday.getUTCDate() - 6)
   const currFrom = currStart.toISOString().split('T')[0]
 
   const prevEnd = new Date(currStart)
@@ -65,24 +70,24 @@ async function CallsData() {
   const prevStart = new Date(prevEnd)
   prevStart.setUTCDate(prevEnd.getUTCDate() - 6)
   const prevFrom = prevStart.toISOString().split('T')[0]
-  const prevTo = prevEnd.toISOString().split('T')[0]
+  const prevTo   = prevEnd.toISOString().split('T')[0]
 
   const [curr, prev, agents, rawCalls] = await Promise.all([
-    getNumberAnalytics(currFrom, todayStr),
+    getNumberAnalytics(currFrom, currTo),
     getNumberAnalytics(prevFrom, prevTo),
-    getAgentAnalytics(currFrom, todayStr),
-    getCalls(currFrom, todayStr),
+    getAgentAnalytics(currFrom, currTo),
+    getCalls(currFrom, currTo),
   ])
 
-  // Date boundaries for filtering (API may return calls outside the requested range)
+  // Strict date boundaries — API sometimes returns calls outside the requested range
   const weekStart = new Date(currFrom + 'T00:00:00Z')
-  const weekEnd   = new Date(todayStr  + 'T23:59:59Z')
+  const weekEnd   = new Date(currTo   + 'T23:59:59Z')
 
   // Build daily chart data
   const dayMap: Record<string, { date: string; inbound: number; outbound: number }> = {}
   for (let i = 6; i >= 0; i--) {
-    const d = new Date(now)
-    d.setUTCDate(now.getUTCDate() - i)
+    const d = new Date(yesterday)
+    d.setUTCDate(yesterday.getUTCDate() - i)
     const key = d.toISOString().split('T')[0]
     const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
     dayMap[key] = { date: label, inbound: 0, outbound: 0 }

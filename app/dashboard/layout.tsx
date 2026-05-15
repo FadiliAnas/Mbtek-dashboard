@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { DashboardNav } from '@/components/DashboardNav'
 import { dbGetLastSync } from '@/lib/db'
 
@@ -20,7 +21,6 @@ async function LastSynced() {
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-[#FAFAFA]">
-      {/* Header */}
       <header className="bg-white border-b border-gray-200">
         <div className="max-w-screen-xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -30,10 +30,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="flex items-center gap-4">
             <LastSynced />
             <form action="/api/auth/logout" method="POST">
-              <button
-                type="submit"
-                className="text-xs text-gray-500 hover:text-gray-800 transition-colors"
-              >
+              <button type="submit" className="text-xs text-gray-500 hover:text-gray-800 transition-colors">
                 Sign out
               </button>
             </form>
@@ -41,13 +38,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </header>
 
-      {/* Tab navigation */}
-      <DashboardNav />
+      <Suspense fallback={<NavFallback />}>
+        <DashboardNav />
+      </Suspense>
 
-      {/* Page content */}
       <main className="max-w-screen-xl mx-auto px-6 py-8">
         {children}
       </main>
     </div>
+  )
+}
+
+function NavFallback() {
+  const tabs = ['Executive Summary', 'Sales Pipeline', 'Client Care', 'Calls', 'Lead Sources', 'Pipelines Audit', 'Analytics Test']
+  return (
+    <nav className="border-b border-gray-200 bg-white">
+      <div className="max-w-screen-xl mx-auto px-6">
+        <div className="flex items-center gap-0">
+          {tabs.map(t => (
+            <span key={t} className="whitespace-nowrap px-4 py-4 text-sm font-medium border-b-2 border-transparent text-gray-400">{t}</span>
+          ))}
+        </div>
+      </div>
+    </nav>
   )
 }

@@ -14,23 +14,26 @@ export async function dbGetPipelines(): Promise<GHLPipeline[]> {
   }))
 }
 
-export async function dbGetOpportunities(): Promise<GHLOpportunity[]> {
+export async function dbGetOpportunities(fromDate?: Date, toDate?: Date): Promise<GHLOpportunity[]> {
   // Fetch in pages of 1000 (Supabase default limit is 1000)
   const all: GHLOpportunity[] = []
   let from = 0
   const PAGE = 1000
 
   while (true) {
-    const { data, error } = await supabase
+    let q = supabase
       .from('ghl_opportunities')
       .select('id, name, monetary_value, status, pipeline_id, pipeline_stage_id, source, contact_id, created_at, updated_at')
-      .range(from, from + PAGE - 1)
+    if (fromDate) q = (q as any).gte('created_at', fromDate.toISOString())
+    if (toDate)   q = (q as any).lte('created_at', toDate.toISOString())
+    const { data, error } = await (q as any).range(from, from + PAGE - 1)
 
     if (error) throw new Error(`dbGetOpportunities: ${error.message}`)
     if (!data || data.length === 0) break
 
     all.push(
-      ...data.map((r) => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...data.map((r: any) => ({
         id: r.id,
         name: r.name ?? '',
         monetaryValue: Number(r.monetary_value ?? 0),
@@ -51,22 +54,25 @@ export async function dbGetOpportunities(): Promise<GHLOpportunity[]> {
   return all
 }
 
-export async function dbGetContacts(): Promise<GHLContact[]> {
+export async function dbGetContacts(fromDate?: Date, toDate?: Date): Promise<GHLContact[]> {
   const all: GHLContact[] = []
   let from = 0
   const PAGE = 1000
 
   while (true) {
-    const { data, error } = await supabase
+    let q = supabase
       .from('ghl_contacts')
       .select('id, first_name, last_name, email, source, tags, date_added, date_updated')
-      .range(from, from + PAGE - 1)
+    if (fromDate) q = (q as any).gte('date_added', fromDate.toISOString())
+    if (toDate)   q = (q as any).lte('date_added', toDate.toISOString())
+    const { data, error } = await (q as any).range(from, from + PAGE - 1)
 
     if (error) throw new Error(`dbGetContacts: ${error.message}`)
     if (!data || data.length === 0) break
 
     all.push(
-      ...data.map((r) => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...data.map((r: any) => ({
         id: r.id,
         firstName: r.first_name ?? undefined,
         lastName: r.last_name ?? undefined,

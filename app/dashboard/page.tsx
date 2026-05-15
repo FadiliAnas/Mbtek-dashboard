@@ -1,7 +1,5 @@
 import { Suspense } from 'react'
 import { dbGetOpportunities, dbGetContacts, dbGetPipelines } from '@/lib/db'
-
-export const dynamic = 'force-dynamic'
 import { computeExecutiveSummary, formatUSD, pctChange } from '@/lib/metrics'
 import { KpiCard } from '@/components/KpiCard'
 import {
@@ -9,6 +7,8 @@ import {
   LeadsVsDealsChart,
   PipelineByStageChart,
 } from '@/components/Charts'
+
+export const dynamic = 'force-dynamic'
 
 async function DashboardData() {
   const [opportunities, contacts, pipelines] = await Promise.all([

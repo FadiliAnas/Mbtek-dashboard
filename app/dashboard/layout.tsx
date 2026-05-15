@@ -50,7 +50,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 }
 
 function NavFallback() {
-  const tabs = ['Executive Summary', 'Sales Pipeline', 'Client Care', 'Calls', 'Lead Sources', 'Pipelines Audit', 'Analytics Test']
+  const tabs = ['Executive Summary', 'Sales Pipeline', 'Client Care', 'Calls', 'Lead Sources', 'Pipelines Audit']
   return (
     <nav className="border-b border-gray-200 bg-white">
       <div className="max-w-screen-xl mx-auto px-6">

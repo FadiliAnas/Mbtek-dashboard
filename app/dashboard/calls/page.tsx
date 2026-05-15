@@ -5,22 +5,27 @@ import type { CallsSnapshot } from '@/components/CallsFilterView'
 
 export const revalidate = 1800
 
+const PERIOD_KEYS = ['today', 'yesterday', 'last_week', 'last_month', 'last_3months'] as const
+
 async function CallsData() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase
-    .from('justcall_analytics_snapshots')
-    .select('*') as any)
+  const snapshots: Record<string, CallsSnapshot> = {}
 
-  if (error) {
-    return (
-      <div className="text-center py-16">
-        <p className="text-[#E74C3C] text-sm font-medium">Failed to load analytics data.</p>
-        <p className="text-gray-400 text-xs mt-1">{error.message}</p>
-      </div>
-    )
-  }
+  await Promise.all(
+    PERIOD_KEYS.map(async (period) => {
+      const { data, error } = await supabase.storage
+        .from('analytics-cache')
+        .download(`snapshots/${period}.json`)
+      if (error || !data) return
+      try {
+        const text = await data.text()
+        snapshots[period] = JSON.parse(text) as CallsSnapshot
+      } catch {
+        // skip malformed snapshots
+      }
+    })
+  )
 
-  if (!data || data.length === 0) {
+  if (Object.keys(snapshots).length === 0) {
     return (
       <div className="text-center py-16">
         <p className="text-gray-500 text-sm font-medium">No analytics data yet.</p>
@@ -31,10 +36,6 @@ async function CallsData() {
       </div>
     )
   }
-
-  const snapshots = Object.fromEntries(
-    (data as CallsSnapshot[]).map(s => [s.period, s])
-  ) as Record<string, CallsSnapshot>
 
   return <CallsFilterView snapshots={snapshots} />
 }

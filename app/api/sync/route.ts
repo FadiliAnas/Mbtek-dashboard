@@ -145,10 +145,15 @@ async function syncCallsAnalytics() {
     })
   }
 
+  // Store each snapshot as a JSON file in Supabase Storage (no table DDL required)
   for (const snap of snapshots) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase.from('justcall_analytics_snapshots') as any).upsert(snap, { onConflict: 'period' })
-    if (error) throw new Error(`justcall_analytics_snapshots upsert (${snap.period}): ${error.message}`)
+    const { error } = await supabase.storage
+      .from('analytics-cache')
+      .upload(`snapshots/${snap.period}.json`, JSON.stringify(snap), {
+        upsert: true,
+        contentType: 'application/json',
+      })
+    if (error) throw new Error(`analytics-cache upload (${snap.period}): ${error.message}`)
   }
 
   return snapshots.length

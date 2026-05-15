@@ -16,7 +16,7 @@ export function sleep(ms: number) {
 
 async function ghlFetch(path: string) {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 20000)
+  const timer = setTimeout(() => controller.abort(), 45000)
   try {
     const res = await fetch(`${BASE}${path}`, {
       headers: ghlHeaders(),

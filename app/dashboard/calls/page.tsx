@@ -2,9 +2,29 @@ import { Suspense } from 'react'
 import { getNumberAnalytics, getAgentAnalytics } from '@/lib/justcall-analytics'
 import { AgentPerformanceSection } from '@/components/AgentPerformanceSection'
 import { CallsVolumeChart, IVRPieChart } from '@/components/Charts'
-import { getCalls } from '@/lib/justcall'
+import { supabase } from '@/lib/supabase'
 
 export const revalidate = 1800
+
+async function getStoredCalls(from: string, to: string) {
+  const PAGE = 1000
+  let offset = 0
+  const result: { call_date: string; direction: string; ivr_digit: string | null }[] = []
+  while (true) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase
+      .from('justcall_calls')
+      .select('call_date,direction,ivr_digit')
+      .gte('call_date', `${from}T00:00:00.000Z`)
+      .lte('call_date', `${to}T23:59:59.999Z`)
+      .range(offset, offset + PAGE - 1) as any)
+    if (error || !data || data.length === 0) break
+    result.push(...data)
+    if (data.length < PAGE) break
+    offset += PAGE
+  }
+  return result
+}
 
 function fmt(s: number) {
   const m = Math.floor(s / 60)
@@ -76,7 +96,7 @@ async function CallsData() {
     getNumberAnalytics(currFrom, currTo),
     getNumberAnalytics(prevFrom, prevTo),
     getAgentAnalytics(currFrom, currTo),
-    getCalls(currFrom, currTo),
+    getStoredCalls(currFrom, currTo),
   ])
 
   // Strict date boundaries — API sometimes returns calls outside the requested range

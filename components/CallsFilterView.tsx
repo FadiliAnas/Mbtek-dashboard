@@ -78,7 +78,7 @@ interface Props {
 }
 
 export function CallsFilterView({ snapshots }: Props) {
-  const [period, setPeriod] = useState<PeriodKey>('today')
+  const [period, setPeriod] = useState<PeriodKey>('last_week')
   const snap = snapshots[period]
 
   return (

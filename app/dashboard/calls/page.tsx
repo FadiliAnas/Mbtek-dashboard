@@ -1,272 +1,286 @@
 import { Suspense } from 'react'
-import { dbGetCalls } from '@/lib/db'
+import { getNumberAnalytics, getAgentAnalytics } from '@/lib/justcall-analytics'
+import { AgentPerformanceSection } from '@/components/AgentPerformanceSection'
+import { CallsVolumeChart, IVRPieChart } from '@/components/Charts'
+import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
-import { CallsHeatmapChart, IVRBreakdownChart } from '@/components/Charts'
 
-// MBtek IVR digit → label mapping (1=Sales, 2=Client Care, 3=Tech Support)
-const IVR_LABELS: Record<string, string> = {
-  '1': 'Sales',
-  '2': 'Client Care',
-  '3': 'Tech Support',
+const IVR_OPTIONS = [
+  { digit: '1', name: 'Sales',             color: '#F26522' },
+  { digit: '2', name: 'Client Care',       color: '#2EB872' },
+  { digit: '3', name: 'Technical Support', color: '#3B82F6' },
+]
+
+function daysAgo(n: number) {
+  const d = new Date()
+  d.setUTCDate(d.getUTCDate() - n)
+  return d.toISOString().split('T')[0]
 }
 
-function formatDuration(seconds: number) {
-  const m = Math.floor(seconds / 60)
-  const s = Math.round(seconds % 60)
-  return `${m}m ${s}s`
+function fmt(s: number) {
+  const m = Math.floor(s / 60)
+  const sec = Math.round(s % 60)
+  return `${m}m ${sec}s`
 }
 
-function isAfterHours(callDate: string): boolean {
-  const d = new Date(callDate)
-  // EDT = UTC-4. Business hours 8am–6pm EDT
-  const hourEDT = (d.getUTCHours() - 4 + 24) % 24
-  return hourEDT < 8 || hourEDT >= 18
+async function getStoredCalls(from: string, to: string) {
+  const PAGE = 1000
+  let offset = 0
+  const result: { call_date: string; direction: string; ivr_digit: string | null }[] = []
+  while (true) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase
+      .from('justcall_calls')
+      .select('call_date,direction,ivr_digit')
+      .gte('call_date', `${from}T00:00:00.000Z`)
+      .lte('call_date', `${to}T23:59:59.999Z`)
+      .range(offset, offset + PAGE - 1) as any)
+    if (error || !data || data.length === 0) break
+    result.push(...data)
+    if (data.length < PAGE) break
+    offset += PAGE
+  }
+  return result
 }
 
-function isSameDay(callDate: string, ref: Date): boolean {
-  const d = new Date(callDate)
+function StatCard({
+  label, value, sub, color,
+}: {
+  label: string
+  value: string | number
+  sub?: string
+  color?: string
+}) {
   return (
-    d.getUTCFullYear() === ref.getUTCFullYear() &&
-    d.getUTCMonth() === ref.getUTCMonth() &&
-    d.getUTCDate() === ref.getUTCDate()
+    <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
+      <p className="text-xs text-gray-500 mb-1">{label}</p>
+      <p className={`text-2xl font-bold ${color ?? 'text-[#1A1A1A]'}`}>{value}</p>
+      {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+    </div>
   )
+}
+
+function SectionHeader({ title }: { title: string }) {
+  return <h2 className="text-sm font-semibold text-[#1A1A1A] mb-4">{title}</h2>
 }
 
 async function CallsData() {
-  const now = new Date()
-  const calls = await dbGetCalls(90)
+  const from = daysAgo(30)
+  const to   = daysAgo(1)
 
-  const weekAgo = new Date()
-  weekAgo.setDate(now.getDate() - 7)
-  const monthAgo = new Date()
-  monthAgo.setDate(now.getDate() - 30)
+  const [summary, agents, calls] = await Promise.all([
+    getNumberAnalytics(from, to),
+    getAgentAnalytics(from, to),
+    getStoredCalls(from, to),
+  ])
 
-  // Time slices
-  const today = calls.filter((c) => isSameDay(c.call_date, now))
-  const thisWeek = calls.filter((c) => new Date(c.call_date) >= weekAgo)
-  const thisMonth = calls.filter((c) => new Date(c.call_date) >= monthAgo)
+  // Daily chart data
+  const fromDt = new Date(`${from}T00:00:00Z`)
+  const toDt   = new Date(`${to}T23:59:59Z`)
+  const dayMap: Record<string, { date: string; inbound: number; outbound: number }> = {}
+  const cur = new Date(fromDt)
+  while (cur <= toDt) {
+    const key   = cur.toISOString().split('T')[0]
+    const label = cur.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+    dayMap[key] = { date: label, inbound: 0, outbound: 0 }
+    cur.setUTCDate(cur.getUTCDate() + 1)
+  }
 
-  // Direction / status (use all 90d for representative stats)
-  const inbound = calls.filter((c) => c.direction === 'inbound')
-  const outbound = calls.filter((c) => c.direction === 'outbound')
-  const missed = calls.filter((c) => c.status === 'missed')
-  const answered = calls.filter((c) => c.status === 'answered')
-  const voicemails = calls.filter((c) => c.status === 'voicemail')
-  const voicemailsThisWeek = voicemails.filter((c) => new Date(c.call_date) >= weekAgo)
-
-  const avgDuration =
-    answered.length > 0
-      ? answered.reduce((s, c) => s + (c.duration ?? 0), 0) / answered.length
-      : 0
-
-  // Outbound connect rate
-  const outboundAnswered = outbound.filter((c) => c.status === 'answered')
-  const outboundConnectRate = outbound.length > 0 ? (outboundAnswered.length / outbound.length) * 100 : 0
-
-  // Missed call rate
-  const missedRate = calls.length > 0 ? (missed.length / calls.length) * 100 : 0
-
-  // IVR breakdown (inbound calls that have ivr_digit set)
-  const ivrCalls = inbound.filter((c) => c.ivr_digit)
-  const ivrAgg: Record<string, number> = {}
-  ivrCalls.forEach((c) => {
-    const digit = c.ivr_digit!
-    ivrAgg[digit] = (ivrAgg[digit] ?? 0) + 1
-  })
-  const ivrData = Object.entries(ivrAgg)
-    .map(([digit, count]) => ({
-      label: IVR_LABELS[digit] ?? `IVR ${digit}`,
-      count,
-      pct: ivrCalls.length > 0 ? (count / ivrCalls.length) * 100 : 0,
-    }))
-    .sort((a, b) => b.count - a.count)
-
-  // Calls per hour (0–23, using 30d data so numbers are meaningful)
-  const hourBuckets: number[] = Array(24).fill(0)
-  thisMonth.forEach((c) => {
+  const ivrCounts: Record<string, number> = { '1': 0, '2': 0, '3': 0 }
+  for (const c of calls) {
     const d = new Date(c.call_date)
-    const hourEDT = (d.getUTCHours() - 4 + 24) % 24
-    hourBuckets[hourEDT]++
-  })
-  const heatmapData = hourBuckets.map((calls, h) => ({
-    hour: h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`,
-    calls,
-  }))
+    if (d < fromDt || d > toDt) continue
+    const key = d.toISOString().split('T')[0]
+    if (dayMap[key]) {
+      if (c.direction === 'inbound') dayMap[key].inbound++
+      else dayMap[key].outbound++
+    }
+    if (c.direction === 'inbound' && c.ivr_digit && ivrCounts[c.ivr_digit] !== undefined) {
+      ivrCounts[c.ivr_digit]++
+    }
+  }
 
-  // After-hours stats (30d)
-  const afterHoursCalls = thisMonth.filter((c) => isAfterHours(c.call_date))
-  const afterHoursMissed = afterHoursCalls.filter((c) => c.status === 'missed')
+  const dailyData = Object.values(dayMap)
+  const ivrData   = IVR_OPTIONS.map(o => ({ ...o, count: ivrCounts[o.digit] }))
+  const ivrTotal  = ivrData.reduce((s, d) => s + d.count, 0)
 
   return (
-    <>
-      {/* KPI Row 1 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-        <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
-          <p className="text-sm text-gray-500 mb-1">Calls Today</p>
-          <p className="text-3xl font-bold text-[#1A1A1A]">{today.length}</p>
-          <p className="text-xs text-gray-400 mt-1">
-            {today.filter((c) => c.status === 'missed').length} missed
-          </p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
-          <p className="text-sm text-gray-500 mb-1">This Week</p>
-          <p className="text-3xl font-bold text-[#1A1A1A]">{thisWeek.length.toLocaleString()}</p>
-          <p className="text-xs text-gray-400 mt-1">
-            {thisWeek.filter((c) => c.status === 'missed').length} missed
-          </p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
-          <p className="text-sm text-gray-500 mb-1">This Month</p>
-          <p className="text-3xl font-bold text-[#1A1A1A]">{thisMonth.length.toLocaleString()}</p>
-          <p className="text-xs text-gray-400 mt-1">last 30 days</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
-          <p className="text-sm text-gray-500 mb-1">Avg Duration</p>
-          <p className="text-3xl font-bold text-[#1A1A1A]">{formatDuration(avgDuration)}</p>
-          <p className="text-xs text-gray-400 mt-1">answered calls</p>
-        </div>
-      </div>
+    <div className="space-y-8">
 
-      {/* KPI Row 2 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      {/* ── DAILY VOLUME CHART ─────────────────────────────────────────────── */}
+      <section>
         <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
-          <p className="text-sm text-gray-500 mb-1">Inbound Split</p>
-          <p className="text-3xl font-bold text-[#1A1A1A]">
-            {calls.length > 0 ? ((inbound.length / calls.length) * 100).toFixed(0) : 0}%
+          <p className="text-sm font-semibold text-[#1A1A1A] mb-1">Daily Call Volume</p>
+          <p className="text-xs text-gray-400 mb-5">
+            Inbound &amp; outbound per day · last 30 days ({from} → {to})
           </p>
-          <p className="text-xs text-gray-400 mt-1">
-            {inbound.length.toLocaleString()} in / {outbound.length.toLocaleString()} out
-          </p>
+          <CallsVolumeChart data={dailyData} />
         </div>
-        <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
-          <p className="text-sm text-gray-500 mb-1">Missed Call Rate</p>
-          <p className={`text-3xl font-bold ${missedRate > 20 ? 'text-[#E74C3C]' : 'text-[#F39C12]'}`}>
-            {missedRate.toFixed(1)}%
-          </p>
-          <p className="text-xs text-gray-400 mt-1">{missed.length.toLocaleString()} missed (90d)</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
-          <p className="text-sm text-gray-500 mb-1">Outbound Connect</p>
-          <p className="text-3xl font-bold text-[#2EB872]">{outboundConnectRate.toFixed(1)}%</p>
-          <p className="text-xs text-gray-400 mt-1">
-            {outboundAnswered.length} of {outbound.length} reached
-          </p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
-          <p className="text-sm text-gray-500 mb-1">Voicemails This Week</p>
-          <p className="text-3xl font-bold text-[#F39C12]">{voicemailsThisWeek.length}</p>
-          <p className="text-xs text-gray-400 mt-1">{voicemails.length} total (90d)</p>
-        </div>
-      </div>
+      </section>
 
-      {/* IVR + After Hours */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
-        <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
-          <h2 className="text-sm font-semibold text-gray-700 mb-4">IVR Breakdown (90 days)</h2>
-          {ivrData.length > 0 ? (
-            <>
-              <IVRBreakdownChart data={ivrData} />
-              <div className="mt-4 space-y-2">
-                {ivrData.map((row) => (
-                  <div key={row.label} className="flex justify-between text-sm">
-                    <span className="text-gray-600">{row.label}</span>
-                    <span className="font-medium text-[#1A1A1A]">
-                      {row.count.toLocaleString()} ({row.pct.toFixed(1)}%)
-                    </span>
+      {/* ── CALLS OVERVIEW ─────────────────────────────────────────────────── */}
+      <section>
+        <SectionHeader title="Calls Overview" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard label="Inbound Calls"   value={summary.incoming_calls} />
+          <StatCard label="Outbound Calls"  value={summary.outgoing_calls} />
+          <StatCard
+            label="Missed Calls"
+            value={summary.incoming_missed_calls}
+            color={summary.incoming_missed_calls > 30 ? 'text-[#E74C3C]' : 'text-[#1A1A1A]'}
+          />
+          <StatCard
+            label="Answer Rate"
+            value={`${summary.incoming_answer_rate}%`}
+            color={summary.incoming_answer_rate < 60 ? 'text-[#E74C3C]' : 'text-[#2EB872]'}
+          />
+        </div>
+      </section>
+
+      {/* ── INBOUND CALLS ──────────────────────────────────────────────────── */}
+      <section>
+        <SectionHeader title="Inbound Calls" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          <StatCard label="Inbound Calls" value={summary.incoming_calls} />
+          <StatCard
+            label="Answer Rate"
+            value={`${summary.incoming_answer_rate}%`}
+            color={summary.incoming_answer_rate < 60 ? 'text-[#E74C3C]' : 'text-[#2EB872]'}
+          />
+          <StatCard
+            label="Missed Calls"
+            value={summary.incoming_missed_calls}
+            color="text-[#E74C3C]"
+          />
+          <StatCard
+            label="SLA Rate (30s)"
+            value={`${summary.sla_rate_30sec}%`}
+            color={summary.sla_rate_30sec < 70 ? 'text-[#F39C12]' : 'text-[#2EB872]'}
+          />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard label="Avg Ring Time"  value={fmt(summary.avg_ring_time)} />
+          <StatCard label="Avg Queue Time" value={fmt(summary.avg_queue_time)} />
+          <StatCard label="Avg Talk Time"  value={fmt(summary.avg_talk_time)} />
+          <StatCard
+            label="Voicemails"
+            value={summary.voicemails_received}
+            color="text-[#F39C12]"
+          />
+        </div>
+      </section>
+
+      {/* ── MISSED CALLS DISTRIBUTION ───────────────────────────────────────── */}
+      <section>
+        <SectionHeader title="Inbound Missed Calls Distribution" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard
+            label="Total Missed"
+            value={summary.incoming_missed_calls}
+            color="text-[#E74C3C]"
+          />
+          <StatCard
+            label="After Office Hours"
+            value={summary.missed_after_office_hours}
+          />
+          <StatCard
+            label="During Office Hours"
+            value={summary.missed_during_agent_hours}
+            color={summary.missed_during_agent_hours > 10 ? 'text-[#E74C3C]' : 'text-[#1A1A1A]'}
+          />
+          <StatCard
+            label="Abandoned Before Ringing"
+            value={summary.missed_abandoned_before_ringing}
+            color="text-[#F39C12]"
+          />
+        </div>
+      </section>
+
+      {/* ── OUTBOUND CALLS ─────────────────────────────────────────────────── */}
+      <section>
+        <SectionHeader title="Outbound Calls" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard label="Outbound Calls" value={summary.outgoing_calls} />
+          <StatCard
+            label="Connect Rate"
+            value={`${summary.outgoing_connect_rate}%`}
+            color={summary.outgoing_connect_rate > 80 ? 'text-[#2EB872]' : 'text-[#F39C12]'}
+          />
+          <StatCard
+            label="Connected"
+            value={summary.outgoing_connected_calls}
+            sub={`${summary.outgoing_not_connected_calls} not reached`}
+            color="text-[#2EB872]"
+          />
+          <StatCard
+            label="Avg Call Duration"
+            value={fmt(summary.avg_call_duration)}
+          />
+        </div>
+      </section>
+
+      {/* ── IVR SELECTION ──────────────────────────────────────────────────── */}
+      <section>
+        <SectionHeader title="ML IVR — Selection Breakdown" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-3">
+            {ivrData.map(o => (
+              <div key={o.digit} className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm flex items-center gap-4">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-lg shrink-0" style={{ backgroundColor: o.color }}>
+                  {o.digit}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-500">{o.name}</p>
+                  <p className="text-2xl font-bold text-[#1A1A1A]">{o.count}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-semibold" style={{ color: o.color }}>
+                    {ivrTotal > 0 ? Math.round((o.count / ivrTotal) * 100) : 0}%
+                  </p>
+                  <div className="w-20 bg-gray-100 rounded-full h-2 mt-1">
+                    <div className="h-2 rounded-full" style={{ width: `${ivrTotal > 0 ? (o.count / ivrTotal) * 100 : 0}%`, backgroundColor: o.color }} />
                   </div>
-                ))}
+                </div>
               </div>
-            </>
-          ) : (
-            <p className="text-gray-400 text-sm">
-              No IVR data available. IVR digit routing may not be configured in JustCall.
-            </p>
-          )}
+            ))}
+            <p className="text-xs text-gray-400 pl-1">{ivrTotal} total IVR selections</p>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm flex items-center justify-center">
+            {ivrTotal > 0
+              ? <IVRPieChart data={ivrData} />
+              : <p className="text-sm text-gray-400">No IVR data for this period</p>
+            }
+          </div>
         </div>
+      </section>
 
-        <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
-          <h2 className="text-sm font-semibold text-gray-700 mb-4">After-Hours (30 days, EDT)</h2>
-          <div className="space-y-4">
-            <div className="flex justify-between items-center py-3 border-b border-gray-50">
-              <span className="text-sm text-gray-600">After-hours calls received</span>
-              <span className="text-xl font-bold text-[#1A1A1A]">{afterHoursCalls.length}</span>
-            </div>
-            <div className="flex justify-between items-center py-3 border-b border-gray-50">
-              <span className="text-sm text-gray-600">After-hours missed</span>
-              <span className="text-xl font-bold text-[#E74C3C]">{afterHoursMissed.length}</span>
-            </div>
-            <div className="flex justify-between items-center py-3 border-b border-gray-50">
-              <span className="text-sm text-gray-600">After-hours miss rate</span>
-              <span className="text-xl font-bold text-[#F39C12]">
-                {afterHoursCalls.length > 0
-                  ? ((afterHoursMissed.length / afterHoursCalls.length) * 100).toFixed(1)
-                  : 0}%
-              </span>
-            </div>
-            <div className="flex justify-between items-center py-3">
-              <span className="text-sm text-gray-600">Business hours 8am–6pm EDT</span>
-              <span className="text-sm text-gray-400">Mon–Fri assumed</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* ── AGENT LEADERBOARD ──────────────────────────────────────────────── */}
+      <AgentPerformanceSection agents={agents} />
 
-      {/* Calls per hour heatmap */}
-      <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm mb-6">
-        <h2 className="text-sm font-semibold text-gray-700 mb-1">Calls by Hour of Day (30 days, EDT)</h2>
-        <p className="text-xs text-gray-400 mb-4">When are most calls happening?</p>
-        <CallsHeatmapChart data={heatmapData} />
-      </div>
-
-      {/* 90-day summary table */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-700">90-Day Call Summary</h2>
-        </div>
-        <div className="p-6 grid grid-cols-2 md:grid-cols-4 gap-6">
-          <div>
-            <p className="text-xs text-gray-500">Total Calls</p>
-            <p className="text-2xl font-bold text-[#1A1A1A]">{calls.length.toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500">Answered</p>
-            <p className="text-2xl font-bold text-[#2EB872]">{answered.length.toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500">Missed</p>
-            <p className="text-2xl font-bold text-[#E74C3C]">{missed.length.toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500">Voicemails</p>
-            <p className="text-2xl font-bold text-[#F39C12]">{voicemails.length.toLocaleString()}</p>
-          </div>
-        </div>
-      </div>
-    </>
+    </div>
   )
 }
 
-function CallsSkeleton() {
+function Skeleton() {
   return (
-    <div className="animate-pulse space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="bg-white rounded-xl border border-gray-100 p-6 h-28" />
-        ))}
-      </div>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl border border-gray-100 p-6 h-64" />
-        <div className="bg-white rounded-xl border border-gray-100 p-6 h-64" />
-      </div>
+    <div className="space-y-8 animate-pulse">
       <div className="bg-white rounded-xl border border-gray-100 p-6 h-48" />
+      {[1, 2, 3, 4].map(i => (
+        <div key={i} className="space-y-4">
+          <div className="h-4 w-48 bg-gray-100 rounded" />
+          <div className="grid grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map(j => <div key={j} className="bg-gray-100 rounded-xl h-24" />)}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
 
 export default function CallsPage() {
   return (
-    <Suspense fallback={<CallsSkeleton />}>
+    <Suspense fallback={<Skeleton />}>
       <CallsData />
     </Suspense>
   )

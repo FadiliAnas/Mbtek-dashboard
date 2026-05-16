@@ -134,7 +134,6 @@ export async function dbGetLastSync(): Promise<string | null> {
   const { data } = await supabase
     .from('sync_log')
     .select('completed_at')
-    .eq('source', 'full')
     .is('error', null)
     .order('completed_at', { ascending: false })
     .limit(1)

@@ -216,27 +216,31 @@ async function handleSync(request: Request) {
     results.opportunities = await upsertBatched('ghl_opportunities', oppRows)
     console.log(`[sync] opportunities: ${results.opportunities}`)
 
-    // ── 3. GHL Contacts ────────────────────────────────────────────────────
-    console.log('[sync] fetching contacts...')
-    try {
-      const contacts = await getContacts()
-      const contactRows = contacts.map((c) => ({
-        id: String(c.id),
-        first_name: c.firstName ?? null,
-        last_name: c.lastName ?? null,
-        email: c.email ?? null,
-        source: c.source ?? null,
-        tags: c.tags ?? [],
-        date_added: c.dateAdded,
-        date_updated: c.dateUpdated ?? null,
-        synced_at: new Date().toISOString(),
-      }))
-      results.contacts = await upsertBatched('ghl_contacts', contactRows)
-      console.log(`[sync] contacts: ${results.contacts}`)
-    } catch (contactErr) {
-      const msg = contactErr instanceof Error ? contactErr.message : String(contactErr)
-      console.warn(`[sync] contacts skipped: ${msg}`)
-      results.contacts = `skipped: ${msg}`
+    // ── 3. GHL Contacts (full sync only — too slow for daily cron) ───────────
+    if (isFull) {
+      console.log('[sync] fetching contacts...')
+      try {
+        const contacts = await getContacts()
+        const contactRows = contacts.map((c) => ({
+          id: String(c.id),
+          first_name: c.firstName ?? null,
+          last_name: c.lastName ?? null,
+          email: c.email ?? null,
+          source: c.source ?? null,
+          tags: c.tags ?? [],
+          date_added: c.dateAdded,
+          date_updated: c.dateUpdated ?? null,
+          synced_at: new Date().toISOString(),
+        }))
+        results.contacts = await upsertBatched('ghl_contacts', contactRows)
+        console.log(`[sync] contacts: ${results.contacts}`)
+      } catch (contactErr) {
+        const msg = contactErr instanceof Error ? contactErr.message : String(contactErr)
+        console.warn(`[sync] contacts skipped: ${msg}`)
+        results.contacts = `skipped: ${msg}`
+      }
+    } else {
+      results.contacts = 'skipped (incremental)'
     }
 
     // ── 4. JustCall Calls ─────────────────────────────────────────────────
